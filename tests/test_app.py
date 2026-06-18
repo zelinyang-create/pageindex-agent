@@ -4,12 +4,12 @@ from fastapi.testclient import TestClient
 
 
 class FakeAgent:
-    def invoke(self, inp, cfg):
+    async def ainvoke(self, inp):
         class M:  # 末条消息
             content = "答案。来源：D · S · 行1-2"
         return {"messages": [M()]}
 
-    def stream(self, inp, cfg, stream_mode=None):
+    async def astream(self, inp, stream_mode=None):
         tool_msg = type("TM", (), {"content": json.dumps({"cite": {"doc": "D", "section": "S", "lines": "1-2"}}, ensure_ascii=False)})()
         tool_msg.__class__.__name__ = "ToolMessage"
         ai = type("AI", (), {"tool_calls": [{"name": "read_node", "args": {"node_id": "d:0"}}], "content": ""})()
@@ -41,6 +41,21 @@ def test_chat_stream_emits_events(monkeypatch):
     assert '"type": "tool"' in body
     assert '"type": "answer"' in body
     assert "D · S · 行1-2" in body
+
+
+class BoomAgent:
+    async def astream(self, inp, stream_mode=None):
+        raise RuntimeError("boom")
+        yield  # 使其成为 async generator
+
+
+def test_chat_stream_error_emits_error_not_answer(monkeypatch):
+    monkeypatch.setattr(app_mod, "get_agent", lambda: BoomAgent())
+    r = TestClient(app_mod.app).post("/chat/stream", json={"message": "问题"})
+    assert r.status_code == 200
+    body = r.text
+    assert '"type": "error"' in body          # 出错时发 error
+    assert '"type": "answer"' not in body      # 绝不伪装成完成的回答
 
 
 def test_build_messages_includes_history():

@@ -44,12 +44,27 @@ def write_domain_terms(terms, dict_path: Path) -> None:
             jieba.add_word(t, freq=10, tag="n")   # 强制整词，不依赖文件格式解析
 
 
-def load_dict(dict_path: Path) -> None:
+def load_dict(dict_path: Path) -> int:
+    """把域词典里每个词强制注册为 jieba 整词（add_word），返回加载词数。
+
+    不走 jieba.load_userdict：它按空格解析、且不会把含 `-`/`.` 的型号保留为整词，
+    会把 `E2-326` 切成 ['E2','-','326']。serving 进程必须调用本函数，否则查询端
+    分词与入库端不一致，型号/图号搜不到。容忍 TAB 或空格分隔（只取第一列）。"""
     if not _JIEBA:
-        return
+        return 0
     dict_path = Path(dict_path)
-    if dict_path.exists():
-        jieba.load_userdict(str(dict_path))
+    if not dict_path.exists():
+        return 0
+    count = 0
+    for line in dict_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        term = re.split(r"[\t ]", line, maxsplit=1)[0].strip()
+        if term:
+            jieba.add_word(term, freq=10, tag="n")
+            count += 1
+    return count
 
 
 def tokenize(text: str) -> list:

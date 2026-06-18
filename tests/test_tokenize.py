@@ -26,3 +26,14 @@ def test_tokenize_keeps_model_after_loading_dict(tmp_path):
     tk.load_dict(dpath)
     toks = tk.tokenize("DEMO1-0603-2X1-50V-0.10n 的耐压是多少")
     assert "DEMO1-0603-2X1-50V-0.10n" in toks
+
+
+def test_load_dict_alone_registers_hyphenated_term(tmp_path):
+    # 手写 TAB 词典（模拟入库产物），不经过 write_domain_terms 的 add_word，
+    # 只靠 load_dict 把含连字符的型号注册为整词
+    dpath = tmp_path / "d.txt"
+    dpath.write_text("ZZQ-9988-7X\t10\tn\n", encoding="utf-8")
+    n = tk.load_dict(dpath)
+    assert n >= 1
+    toks = tk.tokenize("查 ZZQ-9988-7X 参数")
+    assert "ZZQ-9988-7X" in toks

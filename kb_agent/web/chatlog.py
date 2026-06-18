@@ -4,9 +4,12 @@
 """
 import json
 import logging
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 _FMT = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", "%Y-%m-%d %H:%M:%S")
+_MAX_BYTES = 5 * 1024 * 1024   # 单文件 5MB，留 3 个备份，避免日志无限增长
+_BACKUP_COUNT = 3
 
 
 def setup_logging(data_dir) -> logging.Logger:
@@ -37,7 +40,8 @@ def setup_logging(data_dir) -> logging.Logger:
             for h in logger.handlers
         )
         if not already:
-            fh = logging.FileHandler(target, encoding="utf-8")
+            fh = RotatingFileHandler(target, maxBytes=_MAX_BYTES,
+                                     backupCount=_BACKUP_COUNT, encoding="utf-8")
             fh.setFormatter(_FMT)
             logger.addHandler(fh)
     except Exception:

@@ -1,8 +1,19 @@
 import json
+import re
 from pathlib import Path
 
 from .index.bm25_index import BM25Index
 from .snippet import make_snippet
+from .tokenize import load_dict
+
+# 通用占位标题（附表1 / 附件2 / 表3 / 图1 等）不参与"同名窗口"分组：
+# 这类标题在不同段落里会重复出现，按标题相等合并会把不相干的表错并成一段。
+_GENERIC_TITLE = re.compile(r"^(附表|附件|表|图)\s*\d*$")
+
+
+def _is_groupable_title(title: str) -> bool:
+    t = (title or "").strip()
+    return bool(t) and not _GENERIC_TITLE.match(t)
 
 
 class TreeStore:
@@ -17,11 +28,13 @@ class TreeStore:
 
     # ---- 加载 ----
     def _load(self):
+        # 先加载域词典：让查询端分词与入库端一致（型号/图号保持整词，否则搜不到）
+        load_dict(self.data_dir / "domain_dict_auto.txt")
         cat_path = self.data_dir / "catalog" / "document_catalog.json"
         if cat_path.exists():
             self._catalog = json.loads(cat_path.read_text(encoding="utf-8"))
         ws = self.data_dir / "workspace"
-        for f in sorted(ws.glob("doc_*.json")):
+        for f in sorted(ws.glob("doc_*.json")) if ws.exists() else []:
             doc = json.loads(f.read_text(encoding="utf-8"))
             self._docs[doc["id"]] = doc
             self._index_doc(doc)
@@ -109,42 +122,67 @@ class TreeStore:
     def _node(self, node_id):
         return self._nodes.get(node_id)
 
-    def _section_span(self, node_id):
-        """一个长工序/章节常被切成多个【连续同名兄弟节点】（窗口）。
-        返回与本节点标题相同、且在兄弟链上首尾相连的那一串 handle（含自身，按文档序）。"""
+    def _section_members(self, node_id):
+        """一个长工序/章节常被切成多个【连续同名兄弟窗口】。返回与本节点标题相同、
+        在兄弟链上首尾相连的那一串窗口 handle（含自身，按文档序，不含子节点）。
+        通用占位标题（附表N 等）不分组，避免把不相干的表错并成一段。"""
         n = self._nodes.get(node_id)
         if not n:
             return [node_id]
         title = (n["title"] or "").strip()
-        if not title:
+        if not _is_groupable_title(title):
             return [node_id]
-        seq = [node_id]
+        members = [node_id]
         p = n["prev"]
         while p and (self._nodes.get(p, {}).get("title") or "").strip() == title:
-            seq.insert(0, p)
+            members.insert(0, p)
             p = self._nodes[p]["prev"]
         nx = n["next"]
         while nx and (self._nodes.get(nx, {}).get("title") or "").strip() == title:
-            seq.append(nx)
+            members.append(nx)
             nx = self._nodes[nx]["next"]
-        return seq
+        return members
+
+    def _descendants(self, h):
+        out = []
+        for c in self._nodes.get(h, {}).get("child_handles", []):
+            out.append(c)
+            out.extend(self._descendants(c))
+        return out
 
     def _section_info(self, node_id):
-        """若本节点属于一个跨窗口段落（同名兄弟 > 1），返回 {part,total,span}，否则 None。"""
-        span = self._section_span(node_id)
-        if len(span) <= 1:
+        """若本节点属于一个跨窗口段落（同名窗口 > 1），返回 {part,total,span}，否则 None。
+        span 含该段所有窗口【以及窗口下的子节点（附表/附件等）】，按文档序——因为参数表
+        往往挂在窗口的 children 上，只读窗口会漏掉真正的数据。"""
+        members = self._section_members(node_id)
+        if len(members) <= 1:
             return None
-        return {"part": span.index(node_id) + 1, "total": len(span), "span": span}
+        handles = list(members)
+        for m in members:
+            handles.extend(self._descendants(m))
+        handles = sorted(set(handles), key=lambda h: self._nodes[h]["line_num"])
+        return {"part": members.index(node_id) + 1, "total": len(members), "span": handles}
 
-    def search_nodes(self, query: str, top_k: int = 5):
+    def search_nodes(self, query: str, top_k: int = 8):
+        # 索引缺失要显形，不能静默返回 []（否则 agent 会把"检索不可用"误判成"没找到"）
         if self._bm25 is None:
-            return []
+            return {"error": "检索索引未构建或未加载（请先入库 ingest）"}
+        # 多取候选再按 section 折叠：一个长工序会有多个同名窗口，若不折叠会占满 top_k，
+        # 挤掉其它章节/文档。折叠后每段只留最高分代表，agent 再用 section.span 展开。
+        raw = self._bm25.search(query, top_k=top_k * 3)
         out = []
-        for hit in self._bm25.search(query, top_k=top_k):
+        seen_section = set()
+        for hit in raw:
             h = hit["node_id_full"]
             n = self._nodes.get(h)
             if not n:
                 continue
+            sec = self._section_info(h)
+            if sec:
+                key = tuple(self._section_members(h))
+                if key in seen_section:
+                    continue
+                seen_section.add(key)
             item = {
                 "id": h, "title": n["title"], "score": hit["score"],
                 "snippet": make_snippet(n["text"], query),
@@ -152,8 +190,9 @@ class TreeStore:
                 "path": " > ".join(n["path_titles"]),
                 "parent_id": n["parent"], "prev_id": n["prev"], "next_id": n["next"],
             }
-            sec = self._section_info(h)
             if sec:
                 item["section"] = sec
             out.append(item)
+            if len(out) >= top_k:
+                break
         return out

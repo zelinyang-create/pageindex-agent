@@ -80,6 +80,40 @@ def test_read_node_no_section_for_standalone_node(tmp_path):
     assert "section" not in r
 
 
+def _make_section_with_children(tmp_path):
+    """两个同名窗口，各自挂一个附表子节点（参数表）。span 必须把子节点也带上。"""
+    ws = tmp_path / "workspace"; ws.mkdir(parents=True)
+    (tmp_path / "catalog").mkdir(parents=True)
+    doc = {"id": "doc_c", "doc_name": "工艺文件", "doc_description": "x", "line_count": 100,
+           "structure": [
+               {"title": "G10 烧结", "node_id": "0020", "line_num": 10, "summary": "", "text": "窗口1",
+                "nodes": [{"title": "附表1 烧结曲线", "node_id": "0021", "line_num": 12, "summary": "", "text": "曲线参数", "nodes": []}]},
+               {"title": "G10 烧结", "node_id": "0022", "line_num": 20, "summary": "", "text": "窗口2",
+                "nodes": [{"title": "附表2 设备", "node_id": "0023", "line_num": 22, "summary": "", "text": "设备表", "nodes": []}]},
+               # 同名占位标题"附表1"出现两次但是是【通用占位】，不应被并成一段
+               {"title": "附表1", "node_id": "0030", "line_num": 40, "summary": "", "text": "A", "nodes": []},
+               {"title": "附表1", "node_id": "0031", "line_num": 50, "summary": "", "text": "B", "nodes": []}]}
+    (ws / "doc_c.json").write_text(json.dumps(doc, ensure_ascii=False), encoding="utf-8")
+    (tmp_path / "catalog" / "document_catalog.json").write_text(
+        json.dumps([{"doc_id": "doc_c", "doc_name": "工艺文件", "doc_description": "x"}], ensure_ascii=False),
+        encoding="utf-8")
+    return tmp_path
+
+
+def test_section_span_includes_child_nodes(tmp_path):
+    ts = TreeStore(_make_section_with_children(tmp_path))
+    r = ts.read_node("doc_c:0020")
+    assert r["section"]["total"] == 2                       # 2 个窗口
+    # span 必须含两个窗口 + 两个附表子节点，按文档序
+    assert r["section"]["span"] == ["doc_c:0020", "doc_c:0021", "doc_c:0022", "doc_c:0023"]
+
+
+def test_generic_placeholder_title_not_merged(tmp_path):
+    ts = TreeStore(_make_section_with_children(tmp_path))
+    r = ts.read_node("doc_c:0030")                          # 标题"附表1"是通用占位
+    assert "section" not in r                               # 不应与 0031 并成一段
+
+
 def test_read_node_breadcrumb_and_cite(tmp_path):
     ts = TreeStore(_make_data(tmp_path))
     r = ts.read_node("doc_a:0003")

@@ -46,6 +46,40 @@ def test_open_node_children(tmp_path):
     assert [c["id"] for c in ch["children"]] == ["doc_a:0002", "doc_a:0003"]
 
 
+def _make_windowed_data(tmp_path):
+    """一个长工序被切成 3 个连续同名兄弟节点（窗口），外加前后不同标题的节点。"""
+    ws = tmp_path / "workspace"; ws.mkdir(parents=True)
+    (tmp_path / "catalog").mkdir(parents=True)
+    doc = {"id": "doc_w", "type": "md", "path": "x.md",
+           "doc_name": "工艺文件", "doc_description": "说明", "line_count": 100,
+           "structure": [
+               {"title": "G08 前工序", "node_id": "0010", "line_num": 1, "summary": "", "text": "前", "nodes": []},
+               {"title": "G09 脱脂工序", "node_id": "0011", "line_num": 10, "summary": "", "text": "移入、装钵", "nodes": []},
+               {"title": "G09 脱脂工序", "node_id": "0012", "line_num": 20, "summary": "", "text": "装炉、脱脂", "nodes": []},
+               {"title": "G09 脱脂工序", "node_id": "0013", "line_num": 30, "summary": "", "text": "卸炉、移交", "nodes": []},
+               {"title": "G10 后工序", "node_id": "0014", "line_num": 40, "summary": "", "text": "后", "nodes": []}]}
+    (ws / "doc_w.json").write_text(json.dumps(doc, ensure_ascii=False), encoding="utf-8")
+    (ws / "_meta.json").write_text(json.dumps({"doc_w": {}}, ensure_ascii=False), encoding="utf-8")
+    (tmp_path / "catalog" / "document_catalog.json").write_text(
+        json.dumps([{"doc_id": "doc_w", "doc_name": "工艺文件", "doc_description": "说明"}], ensure_ascii=False),
+        encoding="utf-8")
+    return tmp_path
+
+
+def test_read_node_exposes_section_span_for_windowed_section(tmp_path):
+    ts = TreeStore(_make_windowed_data(tmp_path))
+    r = ts.read_node("doc_w:0012")          # 中段
+    assert r["section"]["part"] == 2
+    assert r["section"]["total"] == 3
+    assert r["section"]["span"] == ["doc_w:0011", "doc_w:0012", "doc_w:0013"]
+
+
+def test_read_node_no_section_for_standalone_node(tmp_path):
+    ts = TreeStore(_make_windowed_data(tmp_path))
+    r = ts.read_node("doc_w:0010")          # 标题独一无二
+    assert "section" not in r
+
+
 def test_read_node_breadcrumb_and_cite(tmp_path):
     ts = TreeStore(_make_data(tmp_path))
     r = ts.read_node("doc_a:0003")

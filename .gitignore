@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.env
+.venv/
+venv/
+.pytest_cache/
+
+# 不公开：真实数据（公司文档/树/索引）与内部设计文档/报告
+data/
+docs/

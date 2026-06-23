@@ -21,7 +21,10 @@ def ingest_dir(md_dir, out, model: str) -> None:
     for md_path in sorted(md_dir.glob("*.md")):
         full_text = md_path.read_text(encoding="utf-8")
         tree = build_tree(str(md_path), model=model)
-        doc_id = make_doc_id(tree["doc_name"])
+        # uniq=源文件路径：两个不同 .md 即使 doc_name 相同也不会拿到同一个 doc_id
+        doc_id = make_doc_id(tree["doc_name"], uniq=str(md_path.resolve()))
+        if doc_id in meta:
+            raise ValueError(f"doc_id 碰撞：{doc_id}（{md_path}）——同路径同名重复入库？")
 
         # 落树
         doc = {"id": doc_id, "type": "md", "path": str(md_path.resolve()),

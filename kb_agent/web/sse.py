@@ -1,8 +1,44 @@
 import json
 
 
+def text_of(content) -> str:
+    """把 LangChain 消息的 content 归一成字符串。
+    某些 provider（经 OpenRouter 的部分模型）返回 list 形式的 content
+    （[{"type":"text","text":...}, ...]），直接当字符串用会在拼接/裁剪处抛 TypeError，
+    把正常回答变成 500。这里统一抽取其中的文本片段。"""
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for it in content:
+            if isinstance(it, str):
+                parts.append(it)
+            elif isinstance(it, dict):
+                # {"type":"text","text":...} 或退化成其它带 text 的结构
+                t = it.get("text")
+                if isinstance(t, str):
+                    parts.append(t)
+        return "".join(parts)
+    return str(content)
+
+
 def _cite_str(cite: dict) -> str:
     return f"{cite.get('doc','')} · {cite.get('section','')} · 行{cite.get('lines','')}"
+
+
+def _cite_one(item) -> str:
+    """优先用工具预格式化好的 cite_text（与 agent 正文粘贴的是同一字符串，保证一致）；
+    旧结果或缺字段时回退到从 cite dict 拼接。"""
+    if not isinstance(item, dict):
+        return ""
+    t = item.get("cite_text")
+    if isinstance(t, str) and t.strip():
+        return t
+    if isinstance(item.get("cite"), dict):
+        return _cite_str(item["cite"])
+    return ""
 
 
 def extract_cite(content) -> list:
@@ -14,12 +50,15 @@ def extract_cite(content) -> list:
         except Exception:
             return []
     out = []
-    if isinstance(data, dict) and isinstance(data.get("cite"), dict):
-        out.append(_cite_str(data["cite"]))
+    if isinstance(data, dict):
+        c = _cite_one(data)
+        if c:
+            out.append(c)
     elif isinstance(data, list):
         for item in data:
-            if isinstance(item, dict) and isinstance(item.get("cite"), dict):
-                out.append(_cite_str(item["cite"]))
+            c = _cite_one(item)
+            if c:
+                out.append(c)
     return out
 
 
@@ -32,7 +71,7 @@ def _map_event(mode, data, state):
     events = []
     if mode == "messages":
         chunk, meta = data
-        text = getattr(chunk, "content", "") or ""
+        text = text_of(getattr(chunk, "content", ""))
         node = (meta or {}).get("langgraph_node")
         # 只把 agent 节点产出的、有内容的 token 当答案流
         if text and node in (None, "agent"):

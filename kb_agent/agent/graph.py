@@ -5,6 +5,11 @@ from ..config import settings
 from .tools import KB_TOOLS
 from .prompt import SYSTEM_PROMPT
 
+# ReAct 循环步数上限（每个工具往返≈2 个 superstep）。LangGraph 默认仅 25≈12 轮，
+# 对"在树上漫游+读 span 十几个句柄"的范式太低，会撞 GraphRecursionError。
+# 48≈23 轮，给足漫游余量又仍有界；超限由调用方捕获后优雅降级。
+RECURSION_LIMIT = 48
+
 
 def build_chat_model() -> ChatOpenAI:
     return ChatOpenAI(

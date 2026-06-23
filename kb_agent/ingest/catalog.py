@@ -4,8 +4,12 @@ from .identifiers import extract_identifiers
 from ..tokenize import write_domain_terms
 
 
-def make_doc_id(doc_name: str) -> str:
-    h = hashlib.sha1(doc_name.encode("utf-8")).hexdigest()[:8]
+def make_doc_id(doc_name: str, uniq: str = "") -> str:
+    """doc_id = doc_name(+ 可选 uniq，通常是源文件路径) 的 sha1。
+    传 uniq 可避免不同文件同名（doc_name 相同）时 doc_id 碰撞、互相覆盖工作区文件、
+    并在 BM25 索引里留下指向已不存在文档的悬挂 handle。"""
+    basis = f"{uniq}\n{doc_name}" if uniq else doc_name
+    h = hashlib.sha1(basis.encode("utf-8")).hexdigest()[:8]
     return f"doc_{h}"
 
 

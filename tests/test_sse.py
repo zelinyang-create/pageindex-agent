@@ -35,6 +35,13 @@ def test_extract_cite_from_search_hits_json():
     assert extract_cite(payload) == ["D · S1 · 行1-2", "D · S2 · 行3-4"]
 
 
+def test_extract_cite_prefers_cite_text():
+    # 有 cite_text 时直接用它（与 agent 正文粘贴的同一字符串），不再从 cite 重新拼
+    payload = json.dumps({"cite_text": "工艺文件 · 5.3 回流焊 · 行8-14",
+                          "cite": {"doc": "x", "section": "y", "lines": "1-2"}}, ensure_ascii=False)
+    assert extract_cite(payload) == ["工艺文件 · 5.3 回流焊 · 行8-14"]
+
+
 def test_events_sequence_tool_chunk_answer():
     # 模拟：agent 节点先发一个 tool_call(updates) → tool 结果(updates) → 答案 token(messages)
     tool_ai = FakeAI(tool_calls=[{"name": "read_node", "args": {"node_id": "doc_a:0003"}}])

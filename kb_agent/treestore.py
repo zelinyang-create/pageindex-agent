@@ -16,6 +16,22 @@ def _is_groupable_title(title: str) -> bool:
     return bool(t) and not _GENERIC_TITLE.match(t)
 
 
+# read_node 单次返回正文的默认字符上限：长节点（工序/参数表）一次返回会撑爆上下文，
+# 超出则截断并给 next_offset，由 agent 按需翻页。
+# 6000（约数千 token）：比 4000 宽，减少长 span 的翻页往返（缓解与步数上限叠加的复合失败），
+# 仍远小于上下文窗口。
+DEFAULT_READ_CHARS = 6000
+
+
+def _cite_of(n):
+    """返回 (cite_dict, cite_text)。cite_text 预格式化好，agent 末尾引用原样粘贴即可，
+    无需自己拼接——避免引用幻觉，并与日志/前端从工具结果抽取的口径完全一致。
+    格式与 web/sse.py 的 _cite_str 保持字节一致；字段一律 .get 防御式取值。"""
+    cite = {"doc": n.get("doc_name", ""), "section": n.get("title", ""), "lines": n.get("lines", "")}
+    cite_text = f"{cite['doc']} · {cite['section']} · 行{cite['lines']}"
+    return cite, cite_text
+
+
 class TreeStore:
     def __init__(self, data_dir):
         self.data_dir = Path(data_dir)
@@ -103,17 +119,27 @@ class TreeStore:
         return {"node": node_id, "title": n["title"],
                 "children": [self._brief(c) for c in n["child_handles"]]}
 
-    def read_node(self, node_id):
+    def read_node(self, node_id, offset: int = 0, max_chars: int = DEFAULT_READ_CHARS):
         n = self._nodes.get(node_id)
         if not n:
             return {"error": f"unknown node: {node_id}"}
+        full = n["text"] or ""
+        offset = max(0, int(offset))
+        max_chars = max(1, int(max_chars))
+        chunk = full[offset:offset + max_chars]
+        cite, cite_text = _cite_of(n)
         out = {
-            "id": node_id, "title": n["title"], "text": n["text"],
-            "cite": {"doc": n["doc_name"], "section": n["title"], "lines": n.get("lines", "")},
+            "id": node_id, "title": n["title"], "text": chunk,
+            "total_chars": len(full),
+            "cite": cite, "cite_text": cite_text,
             "path": " > ".join(n["path_titles"]),
             "parent_id": n["parent"], "prev_id": n["prev"], "next_id": n["next"],
             "has_children": bool(n["child_handles"]),
         }
+        # 正文超长被截断：显式告知，并给下一段起点，agent 需要更多再带 offset 翻页
+        if offset + max_chars < len(full):
+            out["truncated"] = True
+            out["next_offset"] = offset + max_chars
         sec = self._section_info(node_id)
         if sec:
             out["section"] = sec
@@ -183,10 +209,11 @@ class TreeStore:
                 if key in seen_section:
                     continue
                 seen_section.add(key)
+            cite, cite_text = _cite_of(n)
             item = {
                 "id": h, "title": n["title"], "score": hit["score"],
                 "snippet": make_snippet(n["text"], query),
-                "cite": {"doc": n["doc_name"], "section": n["title"], "lines": n.get("lines", "")},
+                "cite": cite, "cite_text": cite_text,
                 "path": " > ".join(n["path_titles"]),
                 "parent_id": n["parent"], "prev_id": n["prev"], "next_id": n["next"],
             }

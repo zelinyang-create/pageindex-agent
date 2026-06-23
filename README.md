@@ -4,7 +4,7 @@
 
 ## 架构（三层堆叠，运行时只有一个循环）
 
-- **引擎层**：LangGraph `create_react_agent`（ChatOpenAI 走 OpenRouter + MemorySaver 会话记忆 + `.stream` 流式）。
+- **引擎层**：LangGraph `create_react_agent`（ChatOpenAI 走 OpenRouter + `.stream` 流式）。多轮上下文：Web 端默认**无服务端记忆**，靠前端每轮回传 history；CLI 用 `MemorySaver` + 固定 thread_id 维持 REPL 记忆。
 - **工具层**：5 个 `@tool` —— `list_catalog` / `get_outline` / `open_node` / `read_node` / `search_nodes`。
 - **数据底座**：`TreeStore` 仓储层（PageIndex 文档树 + `bm25s` 节点级索引 + 文档目录）。
 

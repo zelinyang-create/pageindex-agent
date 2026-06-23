@@ -2,14 +2,14 @@ import uuid
 
 from langgraph.checkpoint.memory import MemorySaver
 
-from .agent.graph import build_agent
+from .agent.graph import build_agent, RECURSION_LIMIT
 
 
 def main():
     # CLI 不回传 history，靠 checkpointer + 固定 thread_id 维持 REPL 多轮记忆
     agent = build_agent(MemorySaver())
     thread_id = uuid.uuid4().hex
-    cfg = {"configurable": {"thread_id": thread_id}}
+    cfg = {"configurable": {"thread_id": thread_id}, "recursion_limit": RECURSION_LIMIT}
     print("KB agent CLI（输入 q 退出）")
     while True:
         try:

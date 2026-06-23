@@ -125,3 +125,26 @@ def test_read_node_breadcrumb_and_cite(tmp_path):
     assert r["cite"]["section"] == "5.3 回流焊"
     # 行范围：0003 起于 8，下一个文档序节点 0004 起于 15 → 8-14
     assert r["cite"]["lines"] == "8-14"
+    # cite_text 预格式化好，与 cite 各字段一致，agent 直接粘贴
+    assert r["cite_text"] == "工艺文件 · 5.3 回流焊 · 行8-14"
+
+
+def test_read_node_truncates_long_text(tmp_path):
+    ts = TreeStore(_make_data(tmp_path))
+    long = "x" * 50
+    ts._nodes["doc_a:0003"]["text"] = long           # 注入超长正文
+    r = ts.read_node("doc_a:0003", max_chars=10)
+    assert r["text"] == "x" * 10
+    assert r["truncated"] is True
+    assert r["next_offset"] == 10
+    assert r["total_chars"] == 50
+    # 翻页读后续
+    r2 = ts.read_node("doc_a:0003", offset=10, max_chars=100)
+    assert r2["text"] == "x" * 40
+    assert "truncated" not in r2                       # 已读到尾
+
+
+def test_read_node_no_truncation_flag_when_short(tmp_path):
+    ts = TreeStore(_make_data(tmp_path))
+    r = ts.read_node("doc_a:0003")                     # "峰值 245℃" 很短
+    assert "truncated" not in r and "next_offset" not in r
